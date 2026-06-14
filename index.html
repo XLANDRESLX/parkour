@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Parkour Infinito - Neo Edition (Multiplayer)</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <title>Parkour Infinito - Neo Edition (Multiplayer P2P)</title>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -147,7 +147,7 @@
             border: 1px solid rgba(255, 255, 255, 0.08);
             padding: 15px 25px;
             border-radius: 10px;
-            margin-bottom: 35px;
+            margin-bottom: 25px;
             font-size: 14px;
             color: #cbd5e1;
             text-align: center;
@@ -169,7 +169,7 @@
             width: 280px;
         }
 
-        /* Botón Principal */
+        /* Botones Principales */
         .btn-main {
             padding: 16px 45px;
             font-size: 18px;
@@ -197,6 +197,23 @@
         .btn-secondary:hover {
             background: #334155;
         }
+
+        /* Botón de Invitación Multijugador */
+        #inviteBtn {
+            background: #00f2fe;
+            color: #04060c;
+            font-size: 14px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            margin-bottom: 25px;
+            transition: background 0.2s ease;
+        }
+        #inviteBtn:hover {
+            background: #00c6ff;
+        }
     </style>
 </head>
 <body>
@@ -216,6 +233,8 @@
     <div class="controls-info">
         Moverse: <span>A / D</span> o <span>← / →</span> &nbsp;|&nbsp; Saltar: <span>Espacio / W</span> &nbsp;|&nbsp; Dash: <span>Shift</span> &nbsp;|&nbsp; Pausa: <span>P</span>
     </div>
+
+    <button id="inviteBtn" onclick="copyInviteLink()">🔗 COPIAR LINK PARA JUGAR CON UN AMIGO</button>
 
     <div class="difficulty-container">
         <button class="diff-btn" data-diff="facil" onclick="setDifficulty('facil')">FÁCIL</button>
@@ -249,24 +268,72 @@
 
 <script>
 // ==========================================
-// CONFIGURACIÓN DE RED (SUPABASE REALTIME)
+// CONFIGURACIÓN DE RED (PEERJS P2P DIRECTO)
 // ==========================================
-const SUPABASE_URL = "https://lnnbozsabxvvpiacwazu.supabase.co";
-const SUPABASE_KEY = "sb_publishable_9BkoeLClXFS0jkwHCV14lw_-cy5X-kC";
-
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const myId = Math.random().toString(36).substring(2, 9); 
 let remotePlayers = {}; 
+let connections = [];
 
-const gameChannel = supabaseClient.channel('cyber-room', {
-    config: { broadcast: { self: false } } 
+// Creamos la instancia P2P usando el servidor de apretón de manos global y gratuito
+const peer = new Peer(myId, {
+    host: '0.peerjs.com',
+    port: 443,
+    secure: true
 });
 
-gameChannel
-    .on('broadcast', { event: 'move' }, (payload) => {
-        remotePlayers[payload.payload.id] = payload.payload.data;
-    })
-    .subscribe();
+// Escuchar cuando un amigo se conecte usando nuestro enlace
+peer.on('connection', (conn) => {
+    setupConnection(conn);
+});
+
+// Revisar si entramos al juego a través del link de invitación de un amigo
+const urlParams = new URLSearchParams(window.location.search);
+const connectToId = urlParams.get('join');
+
+if (connectToId) {
+    peer.on('open', () => {
+        const conn = peer.connect(connectToId);
+        setupConnection(conn);
+    });
+}
+
+function setupConnection(conn) {
+    conn.on('open', () => {
+        connections.push(conn);
+        // Ocultar o cambiar el texto del botón al conectarse con éxito
+        document.getElementById("inviteBtn").textContent = "💚 ¡AMIGO CONECTADO EN TIEMPO REAL!";
+        document.getElementById("inviteBtn").style.backgroundColor = "#10b981";
+        document.getElementById("inviteBtn").style.color = "white";
+    });
+
+    conn.on('data', (data) => {
+        // Recibir la posición e id del amigo
+        remotePlayers[data.id] = data.data;
+    });
+
+    conn.on('close', () => {
+        // Limpiar si se desconecta
+        connections = connections.filter(c => c !== conn);
+        document.getElementById("inviteBtn").textContent = "🔗 COPIAR LINK PARA JUGAR CON UN AMIGO";
+        document.getElementById("inviteBtn").style.backgroundColor = "#00f2fe";
+        document.getElementById("inviteBtn").style.color = "#04060c";
+    });
+}
+
+function copyInviteLink() {
+    // Generar la URL limpia quitando parámetros viejos si existían
+    const baseUrl = window.location.href.split('?')[0];
+    const inviteUrl = `${baseUrl}?join=${myId}`;
+    
+    navigator.clipboard.writeText(inviteUrl).then(() => {
+        const btn = document.getElementById("inviteBtn");
+        const originalText = btn.textContent;
+        btn.textContent = "📋 ¡LINK COPIADO! PÁSASELO A TU AMIGO";
+        setTimeout(() => {
+            if(connections.length === 0) btn.textContent = originalText;
+        }, 3000);
+    });
+}
 
 // ==========================================
 // LÓGICA DEL MOTOR GRÁFICO Y JUEGO
@@ -504,7 +571,7 @@ function triggerGameOver() {
     
     if(score > currentHigh) {
         localStorage.setItem("cyberrunner_highscore_" + currentDiff, score);
-        badgeContainer.textContent = "¡NUEVO RÉCORD GLOBAL CONFIGURADO!";
+        badgeContainer.textContent = "¡NUEVO RÉCORD CONFIGURADO!";
         badgeContainer.style.color = "#10b981";
     } else {
         badgeContainer.textContent = `Récord actual: ${currentHigh}m`;
@@ -523,7 +590,6 @@ function loop() {
     requestAnimationFrame(loop);
     
     if(!gameRunning || isPaused) {
-        // Seguir dibujando el fondo congelado para que no parpadee la pantalla
         draw();
         return;
     }
@@ -536,11 +602,9 @@ function update() {
     gameTicks++;
     const diff = difficultySettings[currentDiff];
     
-    // Reducir temporizadores del Dash
     if(player.dashActive > 0) player.dashActive--;
     if(player.dashCooldown > 0) player.dashCooldown--;
     
-    // Movimiento lateral e inercia
     let moveSpeed = player.dashActive > 0 ? 14 : 5.5 * diff.speedModifier;
     
     if (keys['a'] || keys['arrowleft']) {
@@ -550,47 +614,41 @@ function update() {
         player.vx = moveSpeed;
         player.facing = 1;
     } else {
-        player.vx *= 0.8; // Fricción
+        player.vx *= 0.8; 
     }
     
-    // Gravedad
     if(player.dashActive === 0) {
         player.vy += gravity;
     } else {
-        player.vy = 0; // No caer durante el dash
+        player.vy = 0; 
     }
     
-    // Guardar posiciones previas para colisión limpia
     let prevX = player.x;
     let prevY = player.y;
     
     player.x += player.vx;
     player.y += player.vy;
     
-    // Controlar animación del Sprite de correr
     if(Math.abs(player.vx) > 0.5 && player.vy === 0) {
         if(gameTicks % spriteConfig.animSpeed === 0) {
             player.currentFrame = (player.currentFrame + 1) % spriteConfig.totalFrames;
         }
     } else if(player.vy !== 0) {
-        player.currentFrame = 1; // Cuadro de salto fijo
+        player.currentFrame = 1; 
     } else {
-        player.currentFrame = 0; // Cuadro quieto
+        player.currentFrame = 0; 
     }
     
-    // Detección de colisiones con plataformas
     let onGround = false;
     
     for(let plat of platforms) {
         if(rects(player, plat)) {
-            // Venía cayendo desde arriba
             if(prevY + player.h <= plat.y && player.vy > 0) {
                 player.y = plat.y - player.h;
                 player.vy = 0;
                 player.jumps = 2;
                 onGround = true;
             }
-            // Chocar lateralmente con los muros de las plataformas
             else if(prevX + player.w <= plat.x && player.vx > 0) {
                 player.x = plat.x - player.w;
                 player.vx = 0;
@@ -602,25 +660,20 @@ function update() {
         }
     }
     
-    // Si corre por el borde se le quita un salto
     if(!onGround && player.vy > 0 && player.jumps === 2) {
         player.jumps = 1;
     }
     
-    // Actualizar Score dinámico en metros en base a la x máxima alcanzada
     let currentMeters = Math.floor(player.x / 40);
     if(currentMeters > score) {
         score = currentMeters;
         document.getElementById("score").textContent = score;
     }
     
-    // Cámara fluida que sigue al jugador en el eje X
     cameraX = player.x - 200;
     
-    // Generación procedural infinita
     generateMore();
     
-    // Actualizar partículas decorativas
     for(let i = particles.length - 1; i >= 0; i--) {
         let p = particles[i];
         p.x += p.vx;
@@ -629,30 +682,27 @@ function update() {
         if(p.alpha <= 0) particles.splice(i, 1);
     }
     
-    // Condición de caída al vacío (Muerte)
     if(player.y > canvas.height + 100) {
         triggerGameOver();
     }
     
-    // Transmitir posición al servidor para el modo multijugador
-    if(gameTicks % 3 === 0) { // Limitar tasa de envío a Supabase para evitar saturación
-        gameChannel.send({
-            type: 'broadcast',
-            event: 'move',
-            payload: {
-                id: myId,
-                data: { x: player.x, y: player.y, f: player.facing, frame: player.currentFrame }
+    // Transmitir posición directa a todos los amigos en la red PeerJS
+    if(gameTicks % 3 === 0 && connections.length > 0) {
+        connections.forEach(conn => {
+            if(conn.open) {
+                conn.send({
+                    id: myId,
+                    data: { x: player.x, y: player.y, f: player.facing, frame: player.currentFrame }
+                });
             }
         });
     }
 }
 
 function draw() {
-    // Limpiar pantalla con color plano oscuro
     ctx.fillStyle = "#0a0b10";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    // Dibujar Red Estelar de Fondo Parallax
     ctx.fillStyle = "#ffffff";
     for(let star of stars) {
         let x = (star.x * canvas.width - cameraX * 0.15) % canvas.width;
@@ -668,7 +718,6 @@ function draw() {
     ctx.save();
     ctx.translate(-cameraX, 0);
     
-    // Dibujar Partículas
     for(let p of particles) {
         ctx.globalAlpha = p.alpha;
         ctx.fillStyle = p.color;
@@ -678,22 +727,19 @@ function draw() {
     }
     ctx.globalAlpha = 1.0;
     
-    // Dibujar Plataformas Modulares
     for(let plat of platforms) {
         if(plat.x + plat.w > cameraX && plat.x < cameraX + canvas.width) {
-            // Dibujar patrón repetitivo plano usando el SVG incrustado
             for(let sx = 0; sx < plat.w; sx += 32) {
                 let blockW = Math.min(32, plat.w - sx);
                 ctx.drawImage(imgPlatform, 0, 0, blockW, 32, plat.x + sx, plat.y, blockW, 32);
             }
-            // Rellenar la base inferior de la plataforma de color sólido
             ctx.fillStyle = "#0f172a";
             ctx.fillRect(plat.x, plat.y + 32, plat.w, plat.h - 32);
         }
     }
     
-    // Dibujar Jugadores Remotos (Tus amigos en tiempo real)
-    ctx.fillStyle = "rgba(239, 68, 68, 0.4)"; // Sombra plana roja para distinguir aliados
+    // Dibujar Jugadores Remotos P2P con sombra plana roja
+    ctx.fillStyle = "rgba(239, 68, 68, 0.4)";
     for(let id in remotePlayers) {
         let p = remotePlayers[id];
         ctx.save();
@@ -706,13 +752,11 @@ function draw() {
         );
         ctx.restore();
         
-        // Indicador de texto superior para el jugador remoto
         ctx.fillStyle = "#ef4444";
         ctx.font = "bold 11px monospace";
-        ctx.fillText("PLAYER", p.x + 1, p.y - 10);
+        ctx.fillText("AMIGO P2P", p.x - 2, p.y - 10);
     }
     
-    // Dibujar Jugador Principal (Tú)
     if(player) {
         ctx.save();
         ctx.translate(player.x + (player.w / 2), player.y + (player.h / 2));
