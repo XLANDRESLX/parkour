@@ -328,15 +328,15 @@ function setupConnection(conn) {
         if (data.type === "pos") {
             if (remotePlayers[data.id]) {
                 remotePlayers[data.id].targetX = data.x;
-                remotePlayers[data.id].targetRelY = data.relY;
+                remotePlayers[data.id].targetY = data.y;
                 remotePlayers[data.id].f = data.f;
                 remotePlayers[data.id].frame = data.frame;
                 remotePlayers[data.id].name = data.name || remotePlayers[data.id].name;
             } else {
                 remotePlayers[data.id] = {
                     name: data.name || "Anónimo",
-                    targetX: data.x, targetRelY: data.relY,
-                    renderX: data.x, renderY: data.relY + GROUND_Y,
+                    targetX: data.x, targetY: data.y,
+                    renderX: data.x, renderY: data.y,
                     f: data.f, frame: data.frame
                 };
             }
@@ -384,11 +384,10 @@ let rng = {
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-let GROUND_Y = window.innerHeight - 140;
+const GAME_GROUND_Y = 600;
 function resize(){
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    GROUND_Y = canvas.height - 140;
 }
 resize();
 window.addEventListener("resize", resize);
@@ -444,6 +443,7 @@ window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 
 const gravity = 0.65;
 let cameraX = 0;
+let cameraY = 0;
 let score = 0;
 let gameRunning = false;
 let isPaused = false;
@@ -461,7 +461,7 @@ for(let i=0; i<60; i++) {
 function resetPlayer(){
     player = {
         x: 200,
-        y: GROUND_Y - 120,
+        y: GAME_GROUND_Y - 120,
         w: 42,
         h: 56,
         vx: 0,
@@ -477,7 +477,7 @@ function resetPlayer(){
 function createWorld(){
     platforms = [];
     particles = [];
-    platforms.push({ x: 0, y: GROUND_Y, w: 900, h: 600 });
+    platforms.push({ x: 0, y: GAME_GROUND_Y, w: 900, h: 600 });
 
     let lastX = 900;
     for(let i = 0; i < 15; i++){
@@ -494,7 +494,7 @@ function addPlatform(startX){
     const width = (diff.widthMin + rng.next() * (diff.widthMax - diff.widthMin)) * (1 - progression * 0.5);
     
     const heightRange = currentDiff === 'facil' ? 80 : 160;
-    const height = GROUND_Y - (rng.next() * heightRange - 40);
+    const height = GAME_GROUND_Y - (rng.next() * heightRange - 40);
 
     platforms.push({ x: startX + gap, y: height, w: width, h: 600 });
 }
@@ -731,6 +731,7 @@ function update() {
     }
     
     cameraX = player.x - 200;
+    cameraY = player.y - canvas.height * 0.6;
     
     generateMore();
     
@@ -742,7 +743,7 @@ function update() {
         if(p.alpha <= 0) particles.splice(i, 1);
     }
     
-    if(player.y > canvas.height + 100) {
+    if(player.y > GAME_GROUND_Y + 400) {
         triggerGameOver();
     }
     
@@ -754,7 +755,7 @@ function update() {
                     type: "pos",
                     id: myId,
                     name: myName,
-                    x: player.x, relY: player.y - GROUND_Y,
+                    x: player.x, y: player.y,
                     f: player.facing,
                     frame: player.currentFrame
                 });
@@ -771,7 +772,8 @@ function draw() {
     for(let star of stars) {
         let x = (star.x * canvas.width - cameraX * 0.15) % canvas.width;
         if(x < 0) x += canvas.width;
-        let y = star.y * canvas.height;
+        let y = (star.y * canvas.height - cameraY * 0.1) % canvas.height;
+        if(y < 0) y += canvas.height;
         ctx.globalAlpha = star.alpha;
         ctx.beginPath();
         ctx.arc(x, y, star.r, 0, Math.PI * 2);
@@ -780,7 +782,7 @@ function draw() {
     ctx.globalAlpha = 1.0;
     
     ctx.save();
-    ctx.translate(-cameraX, 0);
+    ctx.translate(-cameraX, -cameraY);
     
     for(let p of particles) {
         ctx.globalAlpha = p.alpha;
@@ -807,8 +809,7 @@ function draw() {
     for(let id in remotePlayers) {
         let p = remotePlayers[id];
         p.renderX += (p.targetX - p.renderX) * 0.25;
-        let targetY = p.targetRelY + GROUND_Y;
-        p.renderY += (targetY - p.renderY) * 0.25;
+        p.renderY += (p.targetY - p.renderY) * 0.25;
         
         ctx.save();
         ctx.translate(p.renderX + 21, p.renderY + 28);
