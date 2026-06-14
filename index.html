@@ -214,6 +214,8 @@
         #inviteBtn:hover {
             background: #00c6ff;
         }
+        #nameInput::placeholder { color: #475569; }
+        #nameInput:focus { border-color: #00f2fe; }
     </style>
 </head>
 <body>
@@ -232,6 +234,10 @@
     
     <div class="controls-info">
         Moverse: <span>A / D</span> o <span>← / →</span> &nbsp;|&nbsp; Saltar: <span>Espacio / W</span> &nbsp;|&nbsp; Dash: <span>Shift</span> &nbsp;|&nbsp; Pausa: <span>P</span>
+    </div>
+
+    <div style="margin-bottom: 25px;">
+        <input type="text" id="nameInput" placeholder="Tu nombre" maxlength="12" style="padding: 10px 18px; font-size: 16px; font-weight: 600; background: #1e293b; border: 2px solid #334155; color: #fff; border-radius: 8px; outline: none; text-align: center; width: 200px;">
     </div>
 
     <button id="inviteBtn" onclick="copyInviteLink()">🔗 COPIAR LINK PARA JUGAR CON UN AMIGO</button>
@@ -273,6 +279,8 @@
 const myId = Math.random().toString(36).substring(2, 9); 
 let remotePlayers = {}; 
 let connections = [];
+let myName = "Jugador";
+let gameSeed = Math.floor(Math.random() * 2147483647);
 
 // Creamos la instancia P2P usando el servidor de apretón de manos global y gratuito
 const peer = new Peer(myId, {
@@ -289,6 +297,9 @@ peer.on('connection', (conn) => {
 // Revisar si entramos al juego a través del link de invitación de un amigo
 const urlParams = new URLSearchParams(window.location.search);
 const connectToId = urlParams.get('join');
+const isHost = !connectToId;
+const seedFromUrl = urlParams.get('seed');
+if (seedFromUrl) gameSeed = parseInt(seedFromUrl);
 
 if (connectToId) {
     peer.on('open', () => {
@@ -300,15 +311,33 @@ if (connectToId) {
 function setupConnection(conn) {
     conn.on('open', () => {
         connections.push(conn);
-        // Ocultar o cambiar el texto del botón al conectarse con éxito
+        conn.send({ type: "handshake", seed: gameSeed });
         document.getElementById("inviteBtn").textContent = "💚 ¡AMIGO CONECTADO EN TIEMPO REAL!";
         document.getElementById("inviteBtn").style.backgroundColor = "#10b981";
         document.getElementById("inviteBtn").style.color = "white";
     });
 
     conn.on('data', (data) => {
-        // Recibir la posición e id del amigo
-        remotePlayers[data.id] = data.data;
+        if (data.type === "handshake") {
+            if (!isHost) gameSeed = data.seed;
+            return;
+        }
+        if (data.type === "pos") {
+            if (remotePlayers[data.id]) {
+                remotePlayers[data.id].targetX = data.x;
+                remotePlayers[data.id].targetY = data.y;
+                remotePlayers[data.id].f = data.f;
+                remotePlayers[data.id].frame = data.frame;
+                remotePlayers[data.id].name = data.name || remotePlayers[data.id].name;
+            } else {
+                remotePlayers[data.id] = {
+                    name: data.name || "Anónimo",
+                    targetX: data.x, targetY: data.y,
+                    renderX: data.x, renderY: data.y,
+                    f: data.f, frame: data.frame
+                };
+            }
+        }
     });
 
     conn.on('close', () => {
@@ -323,7 +352,7 @@ function setupConnection(conn) {
 function copyInviteLink() {
     // Generar la URL limpia quitando parámetros viejos si existían
     const baseUrl = window.location.href.split('?')[0];
-    const inviteUrl = `${baseUrl}?join=${myId}`;
+    const inviteUrl = `${baseUrl}?join=${myId}&seed=${gameSeed}`;
     
     navigator.clipboard.writeText(inviteUrl).then(() => {
         const btn = document.getElementById("inviteBtn");
@@ -334,6 +363,17 @@ function copyInviteLink() {
         }, 3000);
     });
 }
+
+let rng = {
+    state: 0,
+    next: function() {
+        this.state = (this.state * 1664525 + 1013904223) & 0xFFFFFFFF;
+        return (this.state >>> 0) / 4294967296;
+    },
+    reset: function(seed) {
+        this.state = seed >>> 0;
+    }
+};
 
 // ==========================================
 // LÓGICA DEL MOTOR GRÁFICO Y JUEGO
@@ -445,13 +485,13 @@ function createWorld(){
 
 function addPlatform(startX){
     const diff = difficultySettings[currentDiff];
-    const progression = Math.min(score / 2000, 0.4); 
+    const progression = Math.min(startX / 80000, 0.4); 
     
-    const gap = (diff.gapMin + Math.random() * (diff.gapMax - diff.gapMin)) * (1 + progression);
-    const width = (diff.widthMin + Math.random() * (diff.widthMax - diff.widthMin)) * (1 - progression * 0.5);
+    const gap = (diff.gapMin + rng.next() * (diff.gapMax - diff.gapMin)) * (1 + progression);
+    const width = (diff.widthMin + rng.next() * (diff.widthMax - diff.widthMin)) * (1 - progression * 0.5);
     
     const heightRange = currentDiff === 'facil' ? 80 : 160;
-    const height = GROUND_Y - (Math.random() * heightRange - 40);
+    const height = GROUND_Y - (rng.next() * heightRange - 40);
 
     platforms.push({ x: startX + gap, y: height, w: width, h: 600 });
 }
@@ -535,6 +575,8 @@ function startGame() {
     document.getElementById("ui").style.display = "block";
     document.getElementById("pauseBtn").style.display = "block";
     
+    myName = document.getElementById("nameInput").value.trim() || "Jugador";
+    
     const badge = document.getElementById("diffBadge");
     badge.textContent = difficultySettings[currentDiff].label;
     badge.style.backgroundColor = difficultySettings[currentDiff].color;
@@ -542,6 +584,7 @@ function startGame() {
     score = 0;
     gameTicks = 0;
     resetPlayer();
+    rng.reset(gameSeed);
     createWorld();
     updateHighScoreDisplay();
     
@@ -555,6 +598,10 @@ function startGame() {
 }
 
 function restart() {
+    gameSeed = Math.floor(Math.random() * 2147483647);
+    connections.forEach(conn => {
+        if (conn.open) conn.send({ type: "handshake", seed: gameSeed });
+    });
     document.getElementById("gameOver").classList.remove("active");
     setTimeout(() => {
         document.getElementById("gameOver").style.display = "none";
@@ -691,8 +738,12 @@ function update() {
         connections.forEach(conn => {
             if(conn.open) {
                 conn.send({
+                    type: "pos",
                     id: myId,
-                    data: { x: player.x, y: player.y, f: player.facing, frame: player.currentFrame }
+                    name: myName,
+                    x: player.x, y: player.y,
+                    f: player.facing,
+                    frame: player.currentFrame
                 });
             }
         });
@@ -738,12 +789,15 @@ function draw() {
         }
     }
     
-    // Dibujar Jugadores Remotos P2P con sombra plana roja
-    ctx.fillStyle = "rgba(239, 68, 68, 0.4)";
+    // Dibujar Jugadores Remotos P2P con interpolación
+    ctx.textAlign = "center";
     for(let id in remotePlayers) {
         let p = remotePlayers[id];
+        p.renderX += (p.targetX - p.renderX) * 0.25;
+        p.renderY += (p.targetY - p.renderY) * 0.25;
+        
         ctx.save();
-        ctx.translate(p.x + 21, p.y + 28);
+        ctx.translate(p.renderX + 21, p.renderY + 28);
         if(p.f === -1) ctx.scale(-1, 1);
         ctx.drawImage(
             imgPlayer,
@@ -754,7 +808,7 @@ function draw() {
         
         ctx.fillStyle = "#ef4444";
         ctx.font = "bold 11px monospace";
-        ctx.fillText("AMIGO P2P", p.x - 2, p.y - 10);
+        ctx.fillText(p.name, p.renderX + 21, p.renderY - 10);
     }
     
     if(player) {
@@ -768,6 +822,10 @@ function draw() {
             -(player.w / 2), -(player.h / 2), player.w, player.h
         );
         ctx.restore();
+        
+        ctx.fillStyle = "#00f2fe";
+        ctx.font = "bold 11px monospace";
+        ctx.fillText(myName, player.x + player.w/2, player.y - 10);
     }
     
     ctx.restore();
