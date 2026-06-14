@@ -325,15 +325,15 @@ function setupConnection(conn) {
         if (data.type === "pos") {
             if (remotePlayers[data.id]) {
                 remotePlayers[data.id].targetX = data.x;
-                remotePlayers[data.id].targetY = data.y;
+                remotePlayers[data.id].targetRelY = data.relY;
                 remotePlayers[data.id].f = data.f;
                 remotePlayers[data.id].frame = data.frame;
                 remotePlayers[data.id].name = data.name || remotePlayers[data.id].name;
             } else {
                 remotePlayers[data.id] = {
                     name: data.name || "Anónimo",
-                    targetX: data.x, targetY: data.y,
-                    renderX: data.x, renderY: data.y,
+                    targetX: data.x, targetRelY: data.relY,
+                    renderX: data.x, renderY: data.relY + GROUND_Y,
                     f: data.f, frame: data.frame
                 };
             }
@@ -741,7 +741,7 @@ function update() {
                     type: "pos",
                     id: myId,
                     name: myName,
-                    x: player.x, y: player.y,
+                    x: player.x, relY: player.y - GROUND_Y,
                     f: player.facing,
                     frame: player.currentFrame
                 });
@@ -794,7 +794,8 @@ function draw() {
     for(let id in remotePlayers) {
         let p = remotePlayers[id];
         p.renderX += (p.targetX - p.renderX) * 0.25;
-        p.renderY += (p.targetY - p.renderY) * 0.25;
+        let targetY = p.targetRelY + GROUND_Y;
+        p.renderY += (targetY - p.renderY) * 0.25;
         
         ctx.save();
         ctx.translate(p.renderX + 21, p.renderY + 28);
